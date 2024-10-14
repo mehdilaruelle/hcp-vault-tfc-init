@@ -22,7 +22,7 @@ terraform {
     }
   }
 
-  backend "remote" {
+  cloud {
     organization = "mlaruelle"
 
     workspaces {

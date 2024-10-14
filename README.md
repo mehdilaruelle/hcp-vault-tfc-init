@@ -5,6 +5,20 @@ For this purpose, we will create a Vault cluster in the [HashiCorp Cloud Platfor
 
 > This folder will only manage the configuration of the Vault and not the GitLab-CI OR the AWS project. Refer to the project `project-gitlab-terraform-vault` for that.
 
+## Description
+
+This repository is design to:
+1. Create and configure a HCP Vault and AWS IAM resources like [roles](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles.html). Those actions are located in the [vault.tf](./vault.tf) & [aws.tf](./aws.tf) files.
+2. Create a GitLab repository (used to deploy the app) and set a Terraform Cloud Workspace to this repository
+3. Configure the permissions to the GitLab-CI repository to have access to secrets stored in Vault like:
+  1. **Retrieve a AWS secret**: to deploy the AWS infrastructure of the application.
+  2. **Retrieve a Terraform Cloud token**: to execute a `local` execution of a Terraform Cloud Workspace. This token has generate based on a Terraform Team who has access to the Terraform Cloud Workspace.
+  3. **Store a Database Dynamic secrets**: when the infrastructure has been deploy, GitLab-CI will store the database secret to Vault as a dynamic secret.
+3. The GitLab-CI is allowed to authenticate to the Vault based on the `GitLab repository ID` and allow the branch `main`. Also, the repository GitLab is feed with some environment variables used by the GitLab-CI (e.g. Vault backend names, Vault role name to used, Vault address, etc )
+
+You will find below an overview of this workflow:
+![workflow creation](./docs/workflow.png)
+
 ## Prerequisite
 
 ### Before to start
@@ -13,7 +27,8 @@ You need to create:
 1. A [GitLab repository and push this repository](https://gitlab.com/)
 2. In **Terraform Cloud**, create a [VCS Providers](https://developer.hashicorp.com/terraform/cloud-docs/vcs) where your GitLab repository is hosted.
 3. Create a [Terraform Cloud Workspace](https://app.terraform.io/) with a `Execution Mode` to `Remote` and **connected to your previous Gitlab Repository**.
-4. Configure the variables bellow.
+4. Update the file `backend.tf` in the `remote` section with your organization name and the workspace name create before.
+5. Configure the variables bellow.
 
 ### Terraform Workspaces variables
 
@@ -34,7 +49,15 @@ Refer to the section `Input` below to check which variables to setup.
 
 ## What this Terraform do ?
 
-It will create JWT auth backend and AWS secret engine for pipeline, AWS auth backend and policy for project.
+It will create:
+- An HCP Vault
+- Gitlab Repository
+- AWS IAM resources
+- Terraform Cloud Workspace
+- A Terraform Cloud Team token allowed to `write` in the Terraform Cloud Workspace created
+- Configure the JWT auth backend for GitLab-CI pipeline and AWS auth backend for the application
+- Configure the AWS and Terraform Cloud secret backend for GitLab-CI pipeline
+- Configure the Database secret backend for the application
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -75,6 +98,7 @@ No modules.
 | [gitlab_project_variable.gitlab_token_aud](https://registry.terraform.io/providers/gitlabhq/gitlab/latest/docs/resources/project_variable) | resource |
 | [gitlab_project_variable.project_name](https://registry.terraform.io/providers/gitlabhq/gitlab/latest/docs/resources/project_variable) | resource |
 | [gitlab_project_variable.terraform_vault_namespace](https://registry.terraform.io/providers/gitlabhq/gitlab/latest/docs/resources/project_variable) | resource |
+| [gitlab_project_variable.tfc_org_name](https://registry.terraform.io/providers/gitlabhq/gitlab/latest/docs/resources/project_variable) | resource |
 | [gitlab_project_variable.vault_addr](https://registry.terraform.io/providers/gitlabhq/gitlab/latest/docs/resources/project_variable) | resource |
 | [gitlab_project_variable.vault_addr_env](https://registry.terraform.io/providers/gitlabhq/gitlab/latest/docs/resources/project_variable) | resource |
 | [gitlab_project_variable.vault_app_auth_aws_path](https://registry.terraform.io/providers/gitlabhq/gitlab/latest/docs/resources/project_variable) | resource |
@@ -88,6 +112,9 @@ No modules.
 | [hcp_hvn.vault](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs/resources/hvn) | resource |
 | [hcp_vault_cluster.main](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs/resources/vault_cluster) | resource |
 | [hcp_vault_cluster_admin_token.this](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs/resources/vault_cluster_admin_token) | resource |
+| [tfe_team.pipeline](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/resources/team) | resource |
+| [tfe_team_access.pipeline](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/resources/team_access) | resource |
+| [tfe_team_token.pipeline](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/resources/team_token) | resource |
 | [tfe_workspace.project](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/resources/workspace) | resource |
 | [tfe_workspace_settings.project](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/resources/workspace_settings) | resource |
 | [vault_auth_backend.aws](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/auth_backend) | resource |
@@ -106,7 +133,6 @@ No modules.
 | [aws_iam_policy_document.assume_role_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.hcp_vault_assume_role_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [tfe_organization.current](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/data-sources/organization) | data source |
-| [tfe_organization_membership.admin](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/data-sources/organization_membership) | data source |
 | [vault_policy_document.pipeline_aws_read](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/policy_document) | data source |
 | [vault_policy_document.project](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/policy_document) | data source |
 
@@ -127,8 +153,6 @@ No modules.
 | <a name="input_project_name"></a> [project\_name](#input\_project\_name) | Project name (ex: web) | `string` | `"web"` | no |
 | <a name="input_region"></a> [region](#input\_region) | AWS regions | `string` | `"eu-west-1"` | no |
 | <a name="input_tfc_org_name"></a> [tfc\_org\_name](#input\_tfc\_org\_name) | The name of the Terraform Cloud Organization where workspace are | `any` | n/a | yes |
-| <a name="input_tfc_secret_engine_token"></a> [tfc\_secret\_engine\_token](#input\_tfc\_secret\_engine\_token) | The Terraform Cloud token for Vault secret engine | `any` | n/a | yes |
-| <a name="input_tfc_user_token_email"></a> [tfc\_user\_token\_email](#input\_tfc\_user\_token\_email) | The email of the Terraform Cloud user used for the token (the token is defined in `tfc_secret_engine_token`) | `any` | n/a | yes |
 | <a name="input_vcs_id"></a> [vcs\_id](#input\_vcs\_id) | value | `any` | n/a | yes |
 
 ## Outputs
